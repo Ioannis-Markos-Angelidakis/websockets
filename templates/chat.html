@@ -37,7 +37,8 @@
 		}
     </style>
     <script type="text/babel">
-	
+	const IP = "";
+	const PORT = "";
 	const { useState, useEffect, useRef } = React;
 
 	const ChatClient = () => {
@@ -52,7 +53,7 @@
 
 		// Initialize WebSocket connection
 		useEffect(() => {
-			ws.current = new WebSocket("ws://192.168.2.4:18080/chat");
+			ws.current = new WebSocket(`ws://${IP}:${PORT}/chat`);
 
 			ws.current.onopen = () => {
 				addSystemMessage("Connected to the chat server.");
