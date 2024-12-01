@@ -15,6 +15,37 @@
 <body>
     <div id="root"></div>
     <style>
+		/* Custom scrollbar for modern browsers */
+		#chat-box::-webkit-scrollbar {
+			width: 6px; /* Slimmer scrollbar */
+			height: 6px; /* Horizontal scrollbar (if needed) */
+		}
+
+		#chat-box::-webkit-scrollbar-track {
+			background: rgba(0, 0, 0, 0.05); /* Transparent track */
+			border-radius: 10px; /* Rounded corners for the track */
+		}
+
+		#chat-box::-webkit-scrollbar-thumb {
+			background: rgba(0, 0, 0, 0.2); /* Subtle dark scrollbar */
+			border-radius: 10px; /* Rounded corners for the thumb */
+			transition: background 0.3s; /* Smooth transition for hover */
+		}
+
+		#chat-box::-webkit-scrollbar-thumb:hover {
+			background: rgba(0, 0, 0, 0.4); /* Slightly darker on hover */
+		}
+
+		/* Firefox Scrollbar */
+		#chat-box {
+			scrollbar-width: thin; /* Slimmer scrollbar */
+			scrollbar-color: rgba(0, 0, 0, 0.2) rgba(0, 0, 0, 0.05); /* Thumb and track colors */
+		}
+
+		/* Smooth scrolling for user experience */
+		#chat-box {
+			scroll-behavior: smooth;
+		}
         #chat-box { 
             height: 65vh;
             overflow-y: auto;
@@ -35,16 +66,86 @@
 				width: 95vw;
 			}
 		}
+
+		.notification-container {
+			position: fixed;
+			top: 10px;
+			right: 10px;
+			z-index: 1000;
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+			animation: fadeIn 0.3s ease-out;
+		}
+
+		.notification {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			width: 260px;
+			padding: 10px 15px;
+			background: rgba(50, 50, 50, 0.8); /* Transparent dark background */
+			color: white;
+			border-radius: 10px;
+			box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+			font-size: 14px;
+			animation: slideIn 0.3s ease-out;
+		}
+
+		.notification .delete-but {
+			background: transparent;
+			border: none;
+			color: white;
+			cursor: pointer;
+			font-size: 20px;
+			position: absolute;
+			margin: auto;
+			right: 10px;
+		}
+
+		@keyframes slideIn {
+			from {
+				transform: translateX(50%);
+				opacity: 0;
+			}
+			to {
+				transform: translateX(0);
+				opacity: 1;
+			}
+		}
+
+		@keyframes fadeIn {
+			from {
+				opacity: 0;
+			}
+			to {
+				opacity: 1;
+			}
+		}
     </style>
     <script type="text/babel">
-	const IP = "";
-	const PORT = "";
+	
 	const { useState, useEffect, useRef } = React;
 
+	const NotificationBox = ({ notifications, removeNotification }) => {	
+		return (
+			<div className="notification-container">
+				{notifications.map((notification, index) => (
+					<div key={index} className="notification">
+						<span>{notification.text}</span>
+						<button className="delete-but" onClick={() => removeNotification(index)}>×</button>
+					</div>
+				))}
+			</div>
+		);
+	};
+
 	const ChatClient = () => {
+		const [userCount, setUserCount] = useState(0);
 		const [messages, setMessages] = useState([]);
-		const [username, setUsername] = useState("Anonymous");
+		const [username, setUsername] = useState(localStorage.getItem("username") || "Anonymous");
 		const [currentMessage, setCurrentMessage] = useState("");
+		const [notifications, setNotifications] = useState([]);
 		const [currentName, setCurrentName] = useState("");
 		const [typingUsers, setTypingUsers] = useState(new Set()); // Track typing users
 		const ws = useRef(null);
@@ -53,40 +154,83 @@
 
 		// Initialize WebSocket connection
 		useEffect(() => {
-			ws.current = new WebSocket(`ws://${IP}:${PORT}/chat`);
+		let reconnectAttempts = 0;
+		const maxReconnectAttempts = 5;
+		const reconnectDelay = 3000; // 3 seconds
+
+		const connectWebSocket = () => {
+			ws.current = new WebSocket("ws://192.168.2.4:18080/chat");
 
 			ws.current.onopen = () => {
-				addSystemMessage("Connected to the chat server.");
+				ws.current.send(`/name ${username}`);
+				addNotification(`Connected to the chat server.`);
+				reconnectAttempts = 0; // Reset attempts on successful connection
 			};
 
 			ws.current.onmessage = (event) => {
-				if (event.data.endsWith("is typing...")) {
-					// Add typing user to the set
+				if (event.data.startsWith("Users connected: ")) {
+					const count = parseInt(event.data.replace("Users connected: ", ""));
+					setUserCount(count);
+					addNotification(event.data);
+				} else if (event.data.endsWith("is typing...")) {
 					setTypingUsers((prev) => new Set(prev).add(event.data.replace(" is typing...", "")));
 				} else if (event.data.endsWith("stopped typing.")) {
-					// Remove stopped typing user from the set
 					setTypingUsers((prev) => {
 						const newSet = new Set(prev);
 						newSet.delete(event.data.replace(" stopped typing.", ""));
 						return newSet;
 					});
+				} else if (event.data.startsWith("You are now known as ")) {
+					const newUsername = event.data.replace("You are now known as ", "");
+					localStorage.setItem("username", newUsername);
+					setUsername(newUsername);
+					addNotification(event.data);
+				} else if (event.data.startsWith("/error")) {
+					addNotification(event.data);
+				} else if (event.data.includes("is now known as")) {
+					addNotification(event.data);
 				} else {
 					addMessage(event.data);
 				}
 			};
 
 			ws.current.onclose = () => {
-				addSystemMessage("Disconnected from the chat server.");
+				addNotification("Disconnected from the chat server.");
+				if (reconnectAttempts < maxReconnectAttempts) {
+					reconnectAttempts++;
+					setTimeout(connectWebSocket, reconnectDelay);
+					addNotification(`Reconnecting... Attempt ${reconnectAttempts}`);
+				} else {
+					addNotification("Unable to reconnect to the chat server.");
+				}
 			};
 
-			return () => {
-				ws.current.close();
+			ws.current.onerror = (error) => {
+				console.error("WebSocket error:", error);
+				ws.current.close(); // Close the connection on error
 			};
-		}, []);
+		};
 
-		// Add a system message (like connection updates)
-		const addSystemMessage = (text) => {
-			setMessages((prev) => [...prev, { type: "system", text }]);
+		connectWebSocket();
+
+		return () => {
+			if (ws.current) {
+				ws.current.close(); // Cleanup on unmount
+			}
+		};
+	}, []);
+
+		// Add a notification
+		const addNotification = (text) => {
+			const notificationId = Date.now();
+			setNotifications((prev) => [...prev, { id: notificationId, text }]);
+			setTimeout(() => {
+				setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+			}, 3000);
+		};
+
+		const removeNotification = (index) => {
+			setNotifications((prev) => prev.filter((_, i) => i !== index));
 		};
 
 		// Add a regular chat message
@@ -104,13 +248,12 @@
 		};
 
 		// Handle setting the username
-		const updateUsername = () => {
+		const updateUsername = async () => {
 			if (currentName.trim()) {
 				ws.current.send(`/name ${currentName}`);
-				setUsername(currentName);
-				addSystemMessage(`You are now known as ${currentName}`);
-				setCurrentName("");
 			}
+			// Clear the input field
+			setCurrentName(""); 
 		};
 
 		// Handle typing notification (do not store in history)
@@ -134,7 +277,7 @@
 			if (chatBoxRef.current) {
 				chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
 			}
-		}, [messages]);
+		}, [messages, typingUsers]);
 
 		// Render messages in the chat
 		const renderMessages = () =>
@@ -156,7 +299,14 @@
 
 		return (
 			<div className="container mt-5">
+				{/* Notification Box */}
+				<NotificationBox notifications={notifications} removeNotification={removeNotification} />
+
 				<h1 className="title is-3 has-text-centered mb-4">WebSocket Chat</h1>
+
+				<h2 className="subtitle is-5 has-text-centered">
+   					 Users online: {userCount}
+				</h2>
 
 				<div className="box">
 					<div id="chat-box" ref={chatBoxRef}>
