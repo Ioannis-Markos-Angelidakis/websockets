@@ -3,9 +3,15 @@
 #include <unordered_map>
 #include <mutex>
 #include <future>
-#include <algorithm>
 
 const std::string IP{""};
+
+void broadcastClientCount(const std::unordered_map<crow::websocket::connection*, std::string>& clients) {
+    std::string user_count_message = "Users connected: " + std::to_string(clients.size());
+    for (auto& [client, username] : clients) {
+        client->send_text(user_count_message);
+    }
+}
 
 int32_t main() {
     crow::SimpleApp app;
@@ -28,30 +34,50 @@ int32_t main() {
 	.onopen([&](crow::websocket::connection& conn) {
 		std::unique_lock lock(resource_mutex);
 		clients[&conn] = "Anonymous";
-		std::cout << "New client connected. Total clients: " << clients.size() << std::endl;
+		std::cout << "New client connected. Total clients: " << clients.size() << "\n"; 
 
 		// Send chat history to the new client
-		for (const auto& message : chat_history) {
+		for (const std::string& message : chat_history) {
 			conn.send_text(message);
 		}
+
+		// Broadcast updated client count
+		broadcastClientCount(clients);
 	})
 	.onmessage([&](crow::websocket::connection& conn, const std::string& data, bool is_binary) {
 		std::unique_lock lock(resource_mutex);
-
+		
 		if (data.starts_with("/name ")) {
 			std::string new_username = data.substr(6);
+
+			for (auto& [client, username] : clients) {
+				if (username == new_username && (client != &conn)) {
+					conn.send_text("/error usarname exists!");
+					if (clients[&conn].empty()) {
+						clients[&conn] = "Anonymous";
+					}
+					return;
+				} 
+			}
+
 			if (!new_username.empty()) {
 				std::string old_username = clients[&conn];
 				clients[&conn] = new_username;
-				std::string notification = old_username + " is now known as " + new_username;
-				chat_history.push_back(notification);
 
-				if (chat_history.size() > max_history_size) {
-					chat_history.pop_front();
+				// Notify others that the old user has stopped typing
+				for (auto& [client, username] : clients) {
+					if (client != &conn) {
+						client->send_text(old_username + " stopped typing.");
+					}
 				}
+				conn.send_text("You are now known as " + new_username);
+				// Broadcast the name change
+				std::string notification = old_username + " is now known as " + new_username;
 
 				for (auto& [client, username] : clients) {
-					client->send_text(notification);
+					if (client != &conn) {
+						client->send_text(notification);
+					}
 				}
 			}
 			return;
@@ -81,7 +107,7 @@ int32_t main() {
 
 		// Normal message broadcast
 		std::string message = clients[&conn] + ": " + data;
-		chat_history.push_back(message);
+		chat_history.emplace_back(message);
 		if (chat_history.size() > max_history_size) {
 			chat_history.pop_front();
 		}
@@ -99,14 +125,18 @@ int32_t main() {
 		clients.erase(&conn);
 
 		std::string notification = username + " has left the chat.";
-		chat_history.push_back(notification);
+		chat_history.emplace_back(notification);
 		if (chat_history.size() > max_history_size) {
 			chat_history.pop_front();
 		}
 
+		// Notify all clients of the disconnection
 		for (auto& [client, username] : clients) {
 			client->send_text(notification);
 		}
+
+		// Broadcast updated client count
+		broadcastClientCount(clients);
 
 		std::cout << "Client disconnected. Remaining clients: " << clients.size() << std::endl;
 	});
