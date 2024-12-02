@@ -151,7 +151,8 @@
 		const ws = useRef(null);
 		const chatBoxRef = useRef(null);
 		const typingTimeout = useRef(null);  // Initialize typing timeout as a ref
-
+		const IP = "";
+			
 		// Initialize WebSocket connection
 		useEffect(() => {
 		let reconnectAttempts = 0;
@@ -159,7 +160,7 @@
 		const reconnectDelay = 3000; // 3 seconds
 
 		const connectWebSocket = () => {
-			ws.current = new WebSocket("ws://192.168.2.4:18080/chat");
+			ws.current = new WebSocket(`ws://${IP}:18080/chat`);
 
 			ws.current.onopen = () => {
 				ws.current.send(`/name ${username}`);
