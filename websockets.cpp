@@ -140,6 +140,7 @@ int32_t main() {
 
 		std::cout << "Client disconnected. Remaining clients: " << clients.size() << std::endl;
 	});
+	//clang++ -Wall -Wextra -Wpedantic -fsanitize=address websockets.cpp -o websockets -std=c++23 -lwsock32 -lws2_32
 
     std::future<void> _a = app.bindaddr(IP).port(18080).multithreaded().run_async();
 }
